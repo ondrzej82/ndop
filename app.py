@@ -41,6 +41,8 @@ CONFIG = {
     'col_count': 'POCET',
     # Sloupec s odkazem (ID):
     'col_link': 'ID_NALEZ',
+    # Sloupec kvadrátem:
+    'col_kvadrat': 'SITMAP',
     # Sloupec se souřadnicí X (EPSG:5514):
     'col_lng': 'X',
     # Sloupec se souřadnicí Y (EPSG:5514):
@@ -92,6 +94,7 @@ def load_data(file_path: str) -> pd.DataFrame:
         CONFIG['col_location_name']: "Místo pozorování",
         CONFIG['col_count_min']: "Počet_min",
         CONFIG['col_count']: "Počet",
+        CONFIG['col_kvadrat']: "Kvadrát",
         CONFIG['col_link']: "Odkaz",
         CONFIG['col_lat']: "SouradniceY",
         CONFIG['col_lng']: "SouradniceX",
@@ -142,7 +145,7 @@ def load_data(file_path: str) -> pd.DataFrame:
         df["Počet_min"] = df["Počet_min"].astype(int)
 
     # Vyčištění nepovinných sloupců, pokud existují
-    for col in ["Město", "Pozorovatel", "Místo pozorování", "Druh"]:
+    for col in ["Město", "Pozorovatel", "Místo pozorování", "Druh", "Kvadrát"]:
         if col in df.columns:
             df[col].fillna("", inplace=True)
 
@@ -178,16 +181,18 @@ df = load_data_from_drive()  # Pro data z Google Drive
 # ========================
 # Příprava checkboxů pro volitelné grafy / mapy
 # ========================
-c1, c2, c3 = st.columns(3)
+c1, c2, c3, c4 = st.columns(4)
 with c1:
     show_bar_yearly = st.checkbox("Graf: Počet druhů v jednotlivých letech", value=True)
-    show_bar_species_yearly = st.checkbox("Graf: Počet pozorování vybraného druhu", value=True)
 with c2:
-    show_pie_top_species = st.checkbox("Koláč: Nejčastější druhy", value=True)
-    show_bar_monthly_obs = st.checkbox("Graf: Počty pozorování podle měsíců", value=True)
+#    show_pie_top_species = st.checkbox("Koláč: Nejčastější druhy", value=True)
+    show_bar_species_yearly = st.checkbox("Graf: Počet pozorování vybraného druhu", value=True)
 with c3:
-    show_map_markers = st.checkbox("Mapa s body pozorování", value=True)
+#    show_map_markers = st.checkbox("Mapa s body pozorování", value=True)
     show_map_heat = st.checkbox("Heatmapa pozorování", value=True)
+with c4:
+    show_bar_monthly_obs = st.checkbox("Graf: Počty pozorování podle měsíců", value=True)
+
 
 # ========================
 # Definice proměnných pro sloupce v aplikaci
@@ -206,7 +211,7 @@ COL_COUNT = "Počet"
 species_list = ["Vyber"]
 if df is not None and not df.empty and COL_SPECIES in df.columns:
     species_list = ["Vyber"] + sorted(set(df[COL_SPECIES].dropna().unique()))
-selected_species = st.selectbox("Vyber druh:", species_list)
+selected_species = st.selectbox("Vyberte druh:", species_list)
 
 # ========================
 # Filtr: Datum (Rok nebo vlastní rozsah)
@@ -317,38 +322,6 @@ if selected_species not in ["Vyber", ""]:
 # ========================
 # Mapa s body pozorování (MarkerCluster)
 # ========================
-if show_map_markers:
-    if not filtered_data.empty and COL_LAT in filtered_data.columns and COL_LNG in filtered_data.columns:
-        # Střed mapy podle průměrné polohy
-        map_center = [
-            filtered_data[COL_LAT].mean(),
-            filtered_data[COL_LNG].mean()
-        ]
-    else:
-        # Fallback: střed ČR
-        map_center = [49.40099, 15.67521]
-
-    m = folium.Map(location=map_center, zoom_start=8.2)
-
-    if not filtered_data.empty:
-        from folium.plugins import MarkerCluster
-        marker_cluster = MarkerCluster().add_to(m)
-        for _, row in filtered_data.dropna(subset=[COL_LAT, COL_LNG]).iterrows():
-            # Popisek v bublině
-            popup_text = ""
-            if "Místo pozorování" in row and row["Místo pozorování"]:
-                popup_text += f"{row['Místo pozorování']}<br>"
-            if COL_COUNT in row and not pd.isna(row[COL_COUNT]):
-                popup_text += f"Počet: {row[COL_COUNT]}"
-            folium.Marker(
-                location=[row[COL_LAT], row[COL_LNG]],
-                popup=popup_text,
-            ).add_to(marker_cluster)
-
-        st.write("### Mapa pozorování (body)")
-        folium_static(m)
-    else:
-        st.info("Pro zobrazení nahoře vyberte druh.")
 
 # ========================
 # Heatmapa pozorování
@@ -362,7 +335,7 @@ if show_map_heat:
     else:
         map_center = [49.40099, 15.67521]
 
-    heat_map = folium.Map(location=map_center, zoom_start=8.2)
+    heat_map = folium.Map(location=map_center, zoom_start=8)
 
     if not filtered_data.empty:
         heat_df = filtered_data.dropna(subset=[COL_LAT, COL_LNG])
@@ -381,6 +354,8 @@ if show_map_heat:
         folium_static(heat_map)
     else:
         st.info("Pro zobrazení nahoře vyberte druh.")
+
+
 
 # ========================
 # Grafy podle měsíců
@@ -440,9 +415,10 @@ if not filtered_data.empty and COL_DATE in filtered_data.columns:
     # st.plotly_chart(fig_monthly_counts)
 
 # ========================
-# Výpis tabulky (limit 100 řádků) s HTML odkazem
+# Výpis tabulky s HTML odkazem + STRÁNKOVÁNÍ (100 záznamů na stránku)
 # ========================
-st.write(f"### Pozorování druhu: {selected_species}")
+st.write(f"### Výpis vyfiltrovaných pozorování")
+
 if not filtered_data.empty:
     # Kopie jen pro úpravu zobrazení
     filtered_data_display = filtered_data.copy()
@@ -461,20 +437,64 @@ if not filtered_data.empty:
             lambda x: x.strftime('%d. %m. %Y') if pd.notna(x) else ''
         )
 
-    # Omezíme zobrazení na prvních 100 řádků
-    limited_data = filtered_data_display.iloc[:100]
+    # Stránkování
+    page_size = 300
+    if "page_number" not in st.session_state:
+        st.session_state.page_number = 0
 
-    # Definice, které sloupce se mají zobrazit (existují-li)
-    # NOVÁ POŽADOVANÁ STRUKTURA: Datum, Počet, Místo pozorování, Město, Pozorovatel, Odkaz
+    total_rows = len(filtered_data_display)
+    n_pages = math.ceil(total_rows / page_size)
+
+#Horní tlačítka
+    col_pag_left, col_pag_mid, col_pag_right = st.columns([1,2,1])
+
+    with col_pag_left:
+        if st.button("← Předchozí", key="prev_bottom"):
+            if st.session_state.page_number > 0:
+                st.session_state.page_number -= 1
+
+    with col_pag_mid:
+        st.write(f"Stránka {st.session_state.page_number + 1} / {n_pages}")
+
+    with col_pag_right:
+        if st.button("Další →", key="next_bottom"):
+            if st.session_state.page_number < n_pages - 1:
+                st.session_state.page_number += 1
+
+    start_idx = st.session_state.page_number * page_size
+    end_idx = start_idx + page_size
+
+    limited_data = filtered_data_display.iloc[start_idx:end_idx]
+
     columns_to_show = []
     for col in ["Datum", "Počet", "Místo pozorování", "Město", "Pozorovatel", "Odkaz"]:
         if col in limited_data.columns:
             columns_to_show.append(col)
 
-    # Zobrazení HTML tabulky
     st.write(
         limited_data[columns_to_show].to_html(index=False, escape=False),
         unsafe_allow_html=True
     )
+
+#Dolní tlačítka
+
+
+    col_pag_left, col_pag_mid, col_pag_right = st.columns([1,2,1])
+
+    with col_pag_left:
+        if st.button("← Předchozí", key="prev_top"):
+            if st.session_state.page_number > 0:
+                st.session_state.page_number -= 1
+
+    with col_pag_mid:
+        st.write(f"Stránka {st.session_state.page_number + 1} / {n_pages}")
+
+    with col_pag_right:
+        if st.button("Další →", key="next_top"):
+            if st.session_state.page_number < n_pages - 1:
+                st.session_state.page_number += 1
+    start_idx = st.session_state.page_number * page_size
+    end_idx = start_idx + page_size
+
 else:
     st.info("Pro zobrazení nahoře vyberte druh.")
