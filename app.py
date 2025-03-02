@@ -8,72 +8,176 @@ from datetime import datetime
 import os
 import math
 
-# Nastavení "wide" layoutu a titulku aplikace
-st.set_page_config(page_title="Avif statistika", layout="wide")
+# Pro transformaci souřadnic z EPSG:5514 na WGS84 (EPSG:4326)
+from pyproj import Transformer
 
-# -------------------------
-# Konfigurace souboru a Google Drive
-# -------------------------
+# -------------------------------------------------------------
+# KÓD S PODPOROU ENCODING CP1250
+# -------------------------------------------------------------
+#   1) Datum je ve formátu YYYYMMDD (parsováno přes %Y%m%d)
+#   2) Souřadnice EPSG:5514 -> WGS84
+#   3) Změna encodingu na cp1250 (místo utf-8-sig)
+#   4) Přidáno low_memory=False, abychom předešli DtypeWarning
+# -------------------------------------------------------------
+
+# ========================
+# Konfigurace sloupců:
+# ========================
+
+CONFIG = {
+    # Sloupec s datem (YYYYMMDD):
+    'col_date': 'DATUM_OD',
+    # Sloupec s názvem druhu:
+    'col_species': 'CESKE_JMENO',
+    # Sloupec s pozorovateli:
+    'col_observer': 'AUTOR',
+    # Sloupec s názvem města/obce:
+    'col_city': 'KATASTR',
+    # Sloupec s názvem místa pozorování:
+    'col_location_name': 'NAZ_LOKAL',
+    # Sloupec s minimálním počtem jedinců (pokud existuje):
+    'col_count_min': 'POCET',
+    # Sloupec s počtem (pokud existuje):
+    'col_count': 'POCET',
+    # Sloupec s odkazem (ID):
+    'col_link': 'ID_NALEZ',
+    # Sloupec se souřadnicí X (EPSG:5514):
+    'col_lng': 'X',
+    # Sloupec se souřadnicí Y (EPSG:5514):
+    'col_lat': 'Y',
+    # Nepovinný sloupec s aktivitou (pokud CSV obsahuje):
+    'col_activity': 'Activity',
+}
+
+# ========================
+# Nastavení Streamlit aplikace
+# ========================
+st.set_page_config(page_title="Statistika pozorování", layout="wide")
+
+# Cesta k souboru CSV (lze nahradit jiným způsobem, např. upload přes st.file_uploader)
 FILE_PATH = "uploaded_file.csv"
-# Zadejte své Google Drive file ID (část URL za "id=")
-FILE_ID = "1rg_3k3OKMJ2C_DkSmFxKfiYMLDRpuyEp"
+#https://drive.google.com/file/d/1aZF_k46UCLIXHj8HGrclXntiT3AsM2rO/view?usp=drive_link
+# ID souboru na Google Drive (pokud nechcete používat Google Drive, stačí vymazat)
+FILE_ID = "1aZF_k46UCLIXHj8HGrclXntiT3AsM2rO"
 FILE_URL = f"https://drive.google.com/uc?id={FILE_ID}"
 
-
-# -------------------------
+# ========================
 # Funkce pro načtení dat z CSV
-# -------------------------
+# ========================
 @st.cache_data
-def load_data(file):
+def load_data(file_path: str) -> pd.DataFrame:
+    """
+    Načte a připraví data z CSV na základě sloupců definovaných v CONFIG.
+    Nově: encoding cp1250 a low_memory=False
+    """
     try:
-        df = pd.read_csv(file, delimiter=';', encoding='utf-8-sig')
+        df = pd.read_csv(
+            file_path,
+            delimiter=';',
+            encoding='utf-8-sig',  # ZMĚNA NA CP1250
+            low_memory=False    # Zamezení DtypeWarning
+        )
         if df.empty:
-            st.error("Nahraný soubor je prázdný. Nahrajte platný CSV soubor.")
+            st.error("Nahraný soubor je prázdný. Nahrajte prosím platný CSV soubor.")
             st.stop()
     except pd.errors.EmptyDataError:
         st.error("Soubor je prázdný nebo neplatný. Nahrajte prosím platný CSV soubor.")
         st.stop()
-    df.rename(columns={
-        "Date": "Datum",
-        "Observers": "Pozorovatel",
-        "Municipality": "Město",
-        "SiteName": "Místo pozorování",
-        "CountMin": "Počet",
-        "Count": "Počet ",
-        "ItemLink": "Odkaz",
-        "Latitude": "Zeměpisná šířka",
-        "Longitude": "Zeměpisná délka"
-    }, inplace=True)
-    df["Datum"] = pd.to_datetime(df["Datum"], format='%Y-%m-%d', errors='coerce')
+
+    # Převod a sjednocení názvů sloupců dle CONFIG
+    rename_dict = {
+        CONFIG['col_date']: "Datum",
+        CONFIG['col_observer']: "Pozorovatel",
+        CONFIG['col_city']: "Město",
+        CONFIG['col_location_name']: "Místo pozorování",
+        CONFIG['col_count_min']: "Počet_min",
+        CONFIG['col_count']: "Počet",
+        CONFIG['col_link']: "Odkaz",
+        CONFIG['col_lat']: "SouradniceY",
+        CONFIG['col_lng']: "SouradniceX",
+        CONFIG['col_species']: "Druh"
+    }
+
+    # Sloupce, které neexistují, ignorujeme (aby to nespadlo, pokud v CSV nejsou)
+    rename_dict = {old: new for old, new in rename_dict.items() if old in df.columns}
+    df.rename(columns=rename_dict, inplace=True)
+
+    # 1) Převod datumu (YYYYMMDD) -> datetime
+    if "Datum" in df.columns:
+        df["Datum"] = pd.to_datetime(df["Datum"], format="%Y%m%d", errors="coerce")
+
+    # 2) Pokud máme souřadnice ve sloupcích SouradniceX a SouradniceY, převedeme je na číslo
+    if "SouradniceX" in df.columns:
+        df["SouradniceX"] = pd.to_numeric(df["SouradniceX"], errors="coerce")
+    if "SouradniceY" in df.columns:
+        df["SouradniceY"] = pd.to_numeric(df["SouradniceY"], errors="coerce")
+
+    # 3) Transformace souřadnic (EPSG:5514 -> WGS84)
+    if "SouradniceX" in df.columns and "SouradniceY" in df.columns:
+        transformer = Transformer.from_crs("EPSG:5514", "EPSG:4326", always_xy=True)
+        # always_xy=True => (x, y) = (lon, lat)
+        # V EPSG:5514 je X = Easting, Y = Northing, transform vrátí (lon, lat) v EPSG:4326
+        lon_list, lat_list = transformer.transform(df["SouradniceX"].values, df["SouradniceY"].values)
+        # Uložíme do dvou nových sloupců:
+        df["Zeměpisná délka"] = lon_list
+        df["Zeměpisná šířka"] = lat_list
+    else:
+        # Pokud neexistují X/Y, jen je vytvoříme prázdné
+        df["Zeměpisná délka"] = None
+        df["Zeměpisná šířka"] = None
+
+    # Pokud sloupec Odkaz (ID) existuje, vytvoříme reálnou URL do sloupce
+    if "Odkaz" in df.columns:
+        df["Odkaz"] = df["Odkaz"].apply(
+            lambda x: f'<a href="https://portal23.nature.cz/nd/find.php?akce=view&akce2=stopValidaci&karta_id={x}" target="_blank">link</a>' if pd.notna(x) else ""
+        )
+
+    # Sloupce s počty, pokud existují
+    if "Počet" in df.columns:
+        df["Počet"].fillna(1, inplace=True)
+        df["Počet"] = df["Počet"].astype(int)
+
+    if "Počet_min" in df.columns:
+        df["Počet_min"].fillna(1, inplace=True)
+        df["Počet_min"] = df["Počet_min"].astype(int)
+
+    # Vyčištění nepovinných sloupců, pokud existují
+    for col in ["Město", "Pozorovatel", "Místo pozorování", "Druh"]:
+        if col in df.columns:
+            df[col].fillna("", inplace=True)
+
+    # Reset indexu
     df = df.reset_index(drop=True)
-    df["Odkaz"] = df["Odkaz"].apply(lambda x: f'<a href="{x}" target="_blank">link</a>' if pd.notna(x) else "")
-    df["Počet"].fillna(1, inplace=True)
-    df["Počet "].fillna("", inplace=True)
-    df["Město"].fillna("", inplace=True)
-    df["Pozorovatel"].fillna("", inplace=True)
-    df["Místo pozorování"].fillna("", inplace=True)
-    df["Počet"] = df["Počet"].astype(int)
+
     return df
 
-# -------------------------
-# Funkce pro stažení souboru z Google Drive (s využitím cache)
-# -------------------------
+
+# ========================
+# Funkce pro stažení a uložení souboru z Google Drive (volitelné)
+# ========================
 @st.cache_data
 def load_data_from_drive():
+    """
+    Pokud chcete používat Google Drive, tato funkce stáhne CSV z drive.
+    V opačném případě ji můžete vynechat a data nahrávat rovnou z disku
+    nebo přes st.file_uploader.
+    """
     import gdown
     if not os.path.exists(FILE_PATH):
         gdown.download(FILE_URL, FILE_PATH, quiet=False)
     return load_data(FILE_PATH)
 
-# -------------------------
-# Načtení dat z Google Drive
-# -------------------------
-df = load_data_from_drive()
 
-# ------------------
-# Checkboxy pro zobrazení / skrytí grafů a map (nahoře na stránce)
-# ------------------
-#with st.expander("Zobrazení grafů a map"):
+# ========================
+# Načtení (nebo stažení) dat
+# ========================
+df = load_data_from_drive()  # Pro data z Google Drive
+# df = load_data(FILE_PATH)  # Pro data z lokálního souboru (alternativa)
+
+
+# ========================
+# Příprava checkboxů pro volitelné grafy / mapy
+# ========================
 c1, c2, c3 = st.columns(3)
 with c1:
     show_bar_yearly = st.checkbox("Graf: Počet druhů v jednotlivých letech", value=True)
@@ -82,30 +186,41 @@ with c2:
     show_pie_top_species = st.checkbox("Koláč: Nejčastější druhy", value=True)
     show_bar_monthly_obs = st.checkbox("Graf: Počty pozorování podle měsíců", value=True)
 with c3:
-#    show_bar_monthly_count = st.checkbox("Graf: Počty jedinců podle měsíců", value=True)
     show_map_markers = st.checkbox("Mapa s body pozorování", value=True)
     show_map_heat = st.checkbox("Heatmapa pozorování", value=True)
 
-# ------------------
-# Filtry: Druh + Datum + Aktivita
-# ------------------
+# ========================
+# Definice proměnných pro sloupce v aplikaci
+# (abychom se nemuseli spoléhat na "tvrdé" názvy sloupců)
+# ========================
+COL_DATE = "Datum"
+COL_SPECIES = "Druh"
+COL_LAT = "Zeměpisná šířka"
+COL_LNG = "Zeměpisná délka"
+COL_COUNT = "Počet"
 
-species_column = "SpeciesName"  # Sloupec s názvem druhu
-activity_column = "Activity"     # Sloupec s aktivitou
 
-# 1) Filtr druhu
+# ========================
+# Filtr: Druh
+# ========================
 species_list = ["Vyber"]
-if df is not None and not df.empty and species_column in df.columns:
-    species_list = ["Vyber"] + sorted(set(df[species_column].dropna().unique()))
+if df is not None and not df.empty and COL_SPECIES in df.columns:
+    species_list = ["Vyber"] + sorted(set(df[COL_SPECIES].dropna().unique()))
 selected_species = st.selectbox("Vyber druh:", species_list)
 
+# ========================
+# Filtr: Datum (Rok nebo vlastní rozsah)
+# ========================
+if COL_DATE in df.columns and not df.empty:
+    date_min = df[COL_DATE].min().date()
+    date_max = df[COL_DATE].max().date()
+    years = sorted(df[COL_DATE].dropna().dt.year.unique())
+else:
+    date_min = datetime.today().date()
+    date_max = datetime.today().date()
+    years = []
 
-# 2) Filtr data
-date_min = df["Datum"].min().date() if df is not None and not df.empty else datetime.today().date()
-date_max = df["Datum"].max().date() if df is not None and not df.empty else datetime.today().date()
-
-years = sorted(df["Datum"].dropna().dt.year.unique()) if df is not None and not df.empty else []
-selected_year = st.selectbox("Vyberte rok:", ["Vlastní rozsah"] + years)
+selected_year = st.selectbox("Vyberte rok:", ["Vlastní rozsah"] + [str(y) for y in years])
 
 if selected_year == "Vlastní rozsah":
     col_date_from, col_date_to = st.columns(2)
@@ -114,157 +229,252 @@ if selected_year == "Vlastní rozsah":
     with col_date_to:
         date_to = st.date_input("Datum do:", date_max, min_value=date_min, max_value=date_max)
 else:
-    date_from = datetime(selected_year, 1, 1).date()
-    date_to = datetime(selected_year, 12, 31).date()
+    # Pokud uživatel vybral rok, bereme 1.1. a 31.12. daného roku
+    try:
+        selected_year_int = int(selected_year)
+        date_from = datetime(selected_year_int, 1, 1).date()
+        date_to = datetime(selected_year_int, 12, 31).date()
+    except:
+        # Pro jistotu fallback:
+        date_from = date_min
+        date_to = date_max
 
-# 3) Filtr aktivity
-#activity_list = ["Vše"]
-#if df is not None and not df.empty and activity_column in df.columns:
-#    unique_activities = sorted(set(df[activity_column].dropna().unique()))
-#    activity_list += unique_activities
-#selected_activity = st.selectbox("Vyber aktivitu (výchozí = Vše):", activity_list)
-
-# ------------------
+# ========================
 # Filtrování dat
-# ------------------
+# ========================
+filtered_data = df.copy()
 
-# Napřed vyfiltrujeme podle data
-filtered_data = df[(df["Datum"].dt.date >= date_from) & (df["Datum"].dt.date <= date_to)]
+if not filtered_data.empty and COL_DATE in filtered_data.columns:
+    filtered_data = filtered_data[
+        (filtered_data[COL_DATE].dt.date >= date_from) &
+        (filtered_data[COL_DATE].dt.date <= date_to)
+    ]
 
-# Pak podle druhu
 if selected_species == "Vyber":
-    # prázdná tabulka
+    # Když není vybraný žádný konkrétní druh, vyprázdníme data:
     filtered_data = filtered_data.iloc[0:0]
-elif selected_species != "Vše":
-    filtered_data = filtered_data[filtered_data[species_column] == selected_species]
+elif selected_species != "Vyber":
+    # Filtr na vybraný druh
+    if COL_SPECIES in filtered_data.columns:
+        filtered_data = filtered_data[filtered_data[COL_SPECIES] == selected_species]
 
 
-# ------------------
-# GRAF 1: Počet pozorovaných druhů v jednotlivých letech
-# ------------------
-if df is not None and not df.empty:
-    yearly_counts = df.groupby(df["Datum"].dt.year)[species_column].nunique().reset_index()
+# ========================
+# Graf: Počet pozorovaných DRUHŮ v jednotlivých letech (z celých DF)
+# ========================
+if df is not None and not df.empty and COL_DATE in df.columns and COL_SPECIES in df.columns:
+    yearly_counts = df.groupby(df[COL_DATE].dt.year)[COL_SPECIES].nunique().reset_index()
+    yearly_counts.columns = ["Rok", "Počet druhů"]
 else:
-    yearly_counts = pd.DataFrame(columns=["Datum", "Počet druhů"])
-yearly_counts.rename(columns={"Datum": "Rok", species_column: "Počet druhů"}, inplace=True)
-fig_yearly = px.bar(yearly_counts, x="Rok", y="Počet druhů", title="Celkový počet pozorovaných druhů podle roku", color_discrete_sequence=["green"])
+    yearly_counts = pd.DataFrame(columns=["Rok", "Počet druhů"])
+
+fig_yearly = px.bar(
+    yearly_counts,
+    x="Rok",
+    y="Počet druhů",
+    title="Celkový počet pozorovaných druhů podle roku",
+)
+
 fig_yearly.update_xaxes(type='category')
 
 if show_bar_yearly:
     st.write("### Počet pozorovaných druhů v jednotlivých letech")
     st.plotly_chart(fig_yearly)
 
-# ------------------
-# GRAF 2: Počet pozorování vybraného druhu v jednotlivých letech
-# ------------------
-years_df = pd.DataFrame({"Rok": years})
-if selected_species not in ["Vyber", "Vše"]:
-    yearly_species_counts = df[df[species_column] == selected_species].groupby(df["Datum"].dt.year).size().reset_index(name="Počet pozorování")
-    yearly_species_counts = years_df.merge(yearly_species_counts, left_on="Rok", right_on="Datum", how="left").fillna(0)
-    yearly_species_counts["Počet pozorování"] = yearly_species_counts["Počet pozorování"].astype(int)
-    fig_species_yearly = px.bar(yearly_species_counts, x="Rok", y="Počet pozorování", title=f"Počet pozorování druhu {selected_species} podle roku", color_discrete_sequence=["purple"])
-    fig_species_yearly.update_xaxes(type='category')
-    fig_species_yearly.update_yaxes(dtick=max(1, yearly_species_counts["Počet pozorování"].max() // 5))
-    if show_bar_species_yearly:
-        st.write(f"### Počet pozorování druhu {selected_species} v jednotlivých letech")
-        st.plotly_chart(fig_species_yearly)
+# ========================
+# Graf: Počet pozorování vybraného druhu v jednotlivých letech
+# ========================
+if selected_species not in ["Vyber", ""]:
+    # Vytvoříme DataFrame se všemi roky, které máme v datech:
+    all_years_df = pd.DataFrame({"Rok": years})
+    # Spočítáme pro vybraný druh
+    if COL_DATE in df.columns and COL_SPECIES in df.columns:
+        yearly_species_counts = (
+            df[df[COL_SPECIES] == selected_species]
+            .groupby(df[COL_DATE].dt.year).size()
+            .reset_index(name="Počet pozorování")
+        )
+        # Propojíme s tabulkou všech roků (aby se zobrazila i nula, kde není pozorování)
+        yearly_species_counts = all_years_df.merge(
+            yearly_species_counts, left_on="Rok", right_on=COL_DATE, how="left"
+        ).fillna(0)
 
-# -------------------------
-# SEZNAM: 10 nejčastěji pozorovaných druhů s procenty
-# -------------------------
-filtered_pie_data = df[(df["Datum"].dt.date >= date_from) & (df["Datum"].dt.date <= date_to)]
-top_species = filtered_pie_data[species_column].value_counts().nlargest(10).reset_index()
-top_species.columns = ["Druh", "Počet pozorování"]
+        # Datový typ
+        yearly_species_counts["Počet pozorování"] = yearly_species_counts["Počet pozorování"].astype(int)
 
-if show_pie_top_species:
-    st.write("### 10 nejčastěji pozorovaných druhů")
-    # Celkový počet pozorování v daném rozsahu
-    total_obs = filtered_pie_data[species_column].count()
-    # Přidáme sloupec s procenty
-    top_species["Procento"] = (top_species["Počet pozorování"] / total_obs * 100).round(1)
-    
-    # Vytvoříme textový výpis, kde u každého druhu zobrazíme název a procentuální podíl v závorce
-    output_text = ""
-    for i, row in top_species.iterrows():
-        output_text += f"{i+1}. {row['Druh']} ({row['Procento']}%)\n"
-    
-    st.markdown(output_text)
+        fig_species_yearly = px.bar(
+            yearly_species_counts,
+            x="Rok",
+            y="Počet pozorování",
+            title=f"Počet pozorování druhu {selected_species} podle roku",
+        )
+        fig_species_yearly.update_xaxes(type='category')
 
-# ------------------
-# MAPA S BODY
-# ------------------
-if not filtered_data.empty and filtered_data[["Zeměpisná šířka", "Zeměpisná délka"]].notna().all().all():
-    map_center = [filtered_data["Zeměpisná šířka"].mean(), filtered_data["Zeměpisná délka"].mean()]
-else:
-    map_center = [49.8175, 15.4730]
+        if show_bar_species_yearly:
+            st.write(f"### Počet pozorování druhu {selected_species} v jednotlivých letech")
+            st.plotly_chart(fig_species_yearly)
 
-m = folium.Map(location=map_center, zoom_start=6)
-
-if not filtered_data.empty:
-    from folium.plugins import MarkerCluster
-    marker_cluster = MarkerCluster().add_to(m)
-    for _, row in filtered_data.dropna(subset=["Zeměpisná šířka", "Zeměpisná délka"]).iterrows():
-        folium.Marker(
-            location=[row["Zeměpisná šířka"], row["Zeměpisná délka"]],
-            popup=f"{row['Místo pozorování']} ({row['Počet']} jedinců)",
-        ).add_to(marker_cluster)
-
+# ========================
+# Mapa s body pozorování (MarkerCluster)
+# ========================
 if show_map_markers:
-    st.write("### Mapa pozorování")
-    folium_static(m)
+    if not filtered_data.empty and COL_LAT in filtered_data.columns and COL_LNG in filtered_data.columns:
+        # Střed mapy podle průměrné polohy
+        map_center = [
+            filtered_data[COL_LAT].mean(),
+            filtered_data[COL_LNG].mean()
+        ]
+    else:
+        # Fallback: střed ČR
+        map_center = [49.40099, 15.67521]
 
-# ------------------
-# HEATMAPA POZOROVÁNÍ
-# ------------------
-heat_map = folium.Map(location=map_center, zoom_start=6)
-if not filtered_data.empty:
-    heat_df = filtered_data.dropna(subset=["Zeměpisná šířka", "Zeměpisná délka", "Počet"])
-    heat_agg = heat_df.groupby(["Zeměpisná šířka", "Zeměpisná délka"])['Počet'].sum().reset_index()
-    heat_data = heat_agg.values.tolist()
-    HeatMap(heat_data, radius=10).add_to(heat_map)
+    m = folium.Map(location=map_center, zoom_start=8.2)
 
+    if not filtered_data.empty:
+        from folium.plugins import MarkerCluster
+        marker_cluster = MarkerCluster().add_to(m)
+        for _, row in filtered_data.dropna(subset=[COL_LAT, COL_LNG]).iterrows():
+            # Popisek v bublině
+            popup_text = ""
+            if "Místo pozorování" in row and row["Místo pozorování"]:
+                popup_text += f"{row['Místo pozorování']}<br>"
+            if COL_COUNT in row and not pd.isna(row[COL_COUNT]):
+                popup_text += f"Počet: {row[COL_COUNT]}"
+            folium.Marker(
+                location=[row[COL_LAT], row[COL_LNG]],
+                popup=popup_text,
+            ).add_to(marker_cluster)
+
+        st.write("### Mapa pozorování (body)")
+        folium_static(m)
+    else:
+        st.info("Pro zobrazení nahoře vyberte druh.")
+
+# ========================
+# Heatmapa pozorování
+# ========================
 if show_map_heat:
-    st.write("### Heatmapa pozorování")
-    folium_static(heat_map)
+    if not filtered_data.empty and COL_LAT in filtered_data.columns and COL_LNG in filtered_data.columns:
+        map_center = [
+            filtered_data[COL_LAT].mean(),
+            filtered_data[COL_LNG].mean()
+        ]
+    else:
+        map_center = [49.40099, 15.67521]
 
-# ------------------
-# GRAFY PODLE MĚSÍCŮ
-# ------------------
-if not filtered_data.empty:
-    filtered_data["Měsíc"] = filtered_data["Datum"].dt.month.map({1: "Leden", 2: "Únor", 3: "Březen", 4: "Duben", 5: "Květen", 6: "Červen", 7: "Červenec", 8: "Srpen", 9: "Září", 10: "Říjen", 11: "Listopad", 12: "Prosinec"})
-    monthly_counts = filtered_data.groupby("Měsíc").agg({"Počet": "sum", "Datum": "count"}).reset_index()
-    monthly_counts.rename(columns={"Datum": "Počet pozorování", "Počet": "Počet jedinců"}, inplace=True)
-    all_months_df = pd.DataFrame({"Měsíc": ["Leden","Únor","Březen","Duben","Květen","Červen","Červenec","Srpen","Září","Říjen","Listopad","Prosinec"]})
+    heat_map = folium.Map(location=map_center, zoom_start=8.2)
+
+    if not filtered_data.empty:
+        heat_df = filtered_data.dropna(subset=[COL_LAT, COL_LNG])
+        # Pokud máme i počty, můžeme je sečíst
+        if COL_COUNT in heat_df.columns:
+            heat_agg = heat_df.groupby([COL_LAT, COL_LNG])[COL_COUNT].sum().reset_index()
+        else:
+            # Pokud nemáme počty, dáme "1" za každé pozorování
+            heat_df["pocty"] = 1
+            heat_agg = heat_df.groupby([COL_LAT, COL_LNG])["pocty"].sum().reset_index()
+
+        heat_data = heat_agg.values.tolist()
+        HeatMap(heat_data, radius=10).add_to(heat_map)
+
+        st.write("### Heatmapa pozorování")
+        folium_static(heat_map)
+    else:
+        st.info("Pro zobrazení nahoře vyberte druh.")
+
+# ========================
+# Grafy podle měsíců
+# ========================
+if not filtered_data.empty and COL_DATE in filtered_data.columns:
+    # Přidáme si textový název měsíce
+    filtered_data["Měsíc"] = filtered_data[COL_DATE].dt.month.map({
+        1: "Leden", 2: "Únor", 3: "Březen", 4: "Duben", 5: "Květen", 6: "Červen",
+        7: "Červenec", 8: "Srpen", 9: "Září", 10: "Říjen", 11: "Listopad", 12: "Prosinec"
+    })
+
+    # Spočítáme počty pozorování a počty jedinců
+    # (pokud kolona "Počet" existuje)
+    group_dict = {"Datum": "count"}
+    if COL_COUNT in filtered_data.columns:
+        group_dict[COL_COUNT] = "sum"
+
+    monthly_counts = filtered_data.groupby("Měsíc").agg(group_dict).reset_index()
+    # Přejmenujeme
+    monthly_counts.rename(columns={
+        "Datum": "Počet pozorování",
+        COL_COUNT: "Počet jedinců" if COL_COUNT in filtered_data.columns else "Počet jedinců (není ve sloupci)"
+    }, inplace=True)
+
+    # Vytvoříme rámec se všemi měsíci (pro správné seřazení a zobrazení i tam, kde jsou 0)
+    all_months_df = pd.DataFrame({
+        "Měsíc": [
+            "Leden","Únor","Březen","Duben","Květen","Červen",
+            "Červenec","Srpen","Září","Říjen","Listopad","Prosinec"
+        ]
+    })
+
+    # Sloučíme a vyplníme nuly
     monthly_counts = all_months_df.merge(monthly_counts, on="Měsíc", how="left").fillna(0)
     monthly_counts["Počet pozorování"] = monthly_counts["Počet pozorování"].astype(int)
-#    monthly_counts["Počet jedinců"] = monthly_counts["Počet jedinců"].astype(int)
+    if "Počet jedinců" in monthly_counts.columns:
+        monthly_counts["Počet jedinců"] = monthly_counts["Počet jedinců"].astype(int)
 
-    fig1 = px.bar(monthly_counts, x="Měsíc", y="Počet pozorování", title="Počet pozorování podle měsíců", color_discrete_sequence=["blue"])
-    fig1.update_yaxes(dtick=max(1, monthly_counts["Počet pozorování"].max() // 5))
-#    fig2 = px.bar(monthly_counts, x="Měsíc", y="Počet jedinců", title="Počet jedinců podle měsíců", color_discrete_sequence=["red"])
-#    fig2.update_yaxes(dtick=max(1, monthly_counts["Počet jedinců"].max() // 5))
-
+    # GRAF: Počet pozorování podle měsíců
     if show_bar_monthly_obs:
+        fig_monthly_obs = px.bar(
+            monthly_counts,
+            x="Měsíc",
+            y="Počet pozorování",
+            title="Počet pozorování podle měsíců"
+        )
         st.write("### Počet pozorování podle měsíců")
-        st.plotly_chart(fig1)
+        st.plotly_chart(fig_monthly_obs)
 
-#    if show_bar_monthly_count:
-#        st.write("### Počet jedinců podle měsíců")
-#        st.plotly_chart(fig2)
+    # (Případně druhý graf pro Počet jedinců, pokud chcete)
+    # fig_monthly_counts = px.bar(
+    #     monthly_counts,
+    #     x="Měsíc",
+    #     y="Počet jedinců",
+    #     title="Počet jedinců podle měsíců"
+    # )
+    # st.plotly_chart(fig_monthly_counts)
 
+# ========================
+# Výpis tabulky (limit 100 řádků) s HTML odkazem
+# ========================
+st.write(f"### Výpis vyfiltrovaných pozorování (max 100 řádků)")
+if not filtered_data.empty:
+    # Kopie jen pro úpravu zobrazení
+    filtered_data_display = filtered_data.copy()
 
-# Výpis dat s podporou stránkování
-st.write(f"### Pozorování druhu: {selected_species}")
-filtered_data_display = filtered_data.copy()
-# Ořízneme text v sloupci "Místo pozorování" na maximálně 50 znaků
-filtered_data_display["Místo pozorování"] = filtered_data_display["Místo pozorování"].apply(
-    lambda x: (x[:50] + "...") if isinstance(x, str) and len(x) > 50 else x)
-# Ořízneme text v sloupci "Pozorovatel" na maximálně 50 znaků
-filtered_data_display["Pozorovatel"] = filtered_data_display["Pozorovatel"].apply(
-    lambda x: (x[:50] + "...") if isinstance(x, str) and len(x) > 50 else x)
- 
-filtered_data_display["Počet"] = filtered_data_display["Počet"].apply(lambda x: 'x' if pd.isna(x) or x == '' else int(x))
-filtered_data_display["Datum"] = filtered_data_display["Datum"].apply(lambda x: x.strftime('%d. %m. %Y') if pd.notna(x) else '')
-# Omezíme zobrazení na prvních 100 řádků
-limited_data = filtered_data_display.iloc[:100]
-st.write(limited_data[["Datum", "Místo pozorování", "Město", "Pozorovatel", "Počet ", "Odkaz"]].to_html(index=False, escape=False), unsafe_allow_html=True)
+    # Pokud sloupce existují, můžeme je zkracovat atd.
+    if "Místo pozorování" in filtered_data_display.columns:
+        filtered_data_display["Místo pozorování"] = filtered_data_display["Místo pozorování"].apply(
+            lambda x: (x[:50] + "...") if isinstance(x, str) and len(x) > 50 else x
+        )
+    if "Pozorovatel" in filtered_data_display.columns:
+        filtered_data_display["Pozorovatel"] = filtered_data_display["Pozorovatel"].apply(
+            lambda x: (x[:50] + "...") if isinstance(x, str) and len(x) > 50 else x
+        )
+    if "Datum" in filtered_data_display.columns:
+        filtered_data_display["Datum"] = filtered_data_display["Datum"].apply(
+            lambda x: x.strftime('%d. %m. %Y') if pd.notna(x) else ''
+        )
+
+    # Omezíme zobrazení na prvních 100 řádků
+    limited_data = filtered_data_display.iloc[:100]
+
+    # Definice, které sloupce se mají zobrazit (existují-li)
+    # NOVÁ POŽADOVANÁ STRUKTURA: Datum, Počet, Místo pozorování, Město, Pozorovatel, Odkaz
+    columns_to_show = []
+    for col in ["Datum", "Počet", "Místo pozorování", "Město", "Pozorovatel", "Odkaz"]:
+        if col in limited_data.columns:
+            columns_to_show.append(col)
+
+    # Zobrazení HTML tabulky
+    st.write(
+        limited_data[columns_to_show].to_html(index=False, escape=False),
+        unsafe_allow_html=True
+    )
+else:
+    st.info("Pro zobrazení nahoře vyberte druh.")
