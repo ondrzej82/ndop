@@ -442,7 +442,7 @@ if not filtered_data.empty and COL_DATE in filtered_data.columns:
 # ========================
 # Výpis tabulky (limit 100 řádků) s HTML odkazem
 # ========================
-st.write(f"### Výpis vyfiltrovaných pozorování (max 100 řádků)")
+st.write(f"### Pozorování druhu: {selected_species}")
 if not filtered_data.empty:
     # Kopie jen pro úpravu zobrazení
     filtered_data_display = filtered_data.copy()
