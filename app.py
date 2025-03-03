@@ -439,7 +439,7 @@ if show_map_heat:
         heat_data = heat_agg.values.tolist()
         HeatMap(heat_data, radius=10).add_to(heat_map)
 
-        st.write("### Heatmapa pozorování")
+        st.write("### Mapa pozorování")
         folium_static(heat_map)
     else:
         st.info("Pro zobrazení nahoře vyberte druh.")
