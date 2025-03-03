@@ -25,8 +25,10 @@ from pyproj import Transformer
 # ========================
 
 CONFIG = {
-    # Sloupec s datem (YYYYMMDD):
+    # Sloupec s datem od (YYYYMMDD):
     'col_date': 'DATUM_OD',
+    # Sloupec s datem do (YYYYMMDD):
+    'col_date2': 'DATUM_DO',
     # Sloupec s názvem druhu:
     'col_species': 'CESKE_JMENO',
     # Sloupec s pozorovateli:
@@ -89,6 +91,7 @@ def load_data(file_path: str) -> pd.DataFrame:
     # Převod a sjednocení názvů sloupců dle CONFIG
     rename_dict = {
         CONFIG['col_date']: "Datum",
+        CONFIG['col_date2']: "Datum2",
         CONFIG['col_observer']: "Pozorovatel",
         CONFIG['col_city']: "Město",
         CONFIG['col_location_name']: "Místo pozorování",
@@ -108,6 +111,11 @@ def load_data(file_path: str) -> pd.DataFrame:
     # 1) Převod datumu (YYYYMMDD) -> datetime
     if "Datum" in df.columns:
         df["Datum"] = pd.to_datetime(df["Datum"], format="%Y%m%d", errors="coerce")
+
+    # 1a) Převod datumu (YYYYMMDD) -> datetime
+    if "Datum2" in df.columns:
+        df["Datum2"] = pd.to_datetime(df["Datum2"], format="%Y%m%d", errors="coerce")
+
 
     # 2) Pokud máme souřadnice ve sloupcích SouradniceX a SouradniceY, převedeme je na číslo
     if "SouradniceX" in df.columns:
@@ -188,7 +196,7 @@ with c2:
 #    show_pie_top_species = st.checkbox("Koláč: Nejčastější druhy", value=True)
     show_bar_species_yearly = st.checkbox("Graf: Počet pozorování vybraného druhu", value=True)
 with c3:
-#    show_map_markers = st.checkbox("Mapa s body pozorování", value=True)
+    show_map_markers = st.checkbox("Mapa s body pozorování", value=True)
     show_map_heat = st.checkbox("Heatmapa pozorování", value=True)
 with c4:
     show_bar_monthly_obs = st.checkbox("Graf: Počty pozorování podle měsíců", value=True)
@@ -199,6 +207,7 @@ with c4:
 # (abychom se nemuseli spoléhat na "tvrdé" názvy sloupců)
 # ========================
 COL_DATE = "Datum"
+COL_DATE2 = "Datum2"
 COL_SPECIES = "Druh"
 COL_LAT = "Zeměpisná šířka"
 COL_LNG = "Zeměpisná délka"
@@ -282,9 +291,53 @@ fig_yearly = px.bar(
 
 fig_yearly.update_xaxes(type='category')
 
-if show_bar_yearly:
+# Podmínka pro zobrazení grafu pouze pokud je ve filtru vybráno "vyber"
+if show_bar_yearly and selected_species == "Vyber":
+ #   st.write("### Počet pozorovaných druhů v jednotlivých letech")
+    st.plotly_chart(fig_yearly)
+
+# ========================
+# Graf: Počet pozorovaných DRUHŮ v jednotlivých letech (z celých DF)
+# ========================
+if df is not None and not df.empty and COL_DATE in df.columns and COL_SPECIES in df.columns:
+    yearly_counts = df.groupby(df[COL_DATE].dt.year)[COL_SPECIES].nunique().reset_index()
+    yearly_counts.columns = ["Rok", "Počet druhů"]
+else:
+    yearly_counts = pd.DataFrame(columns=["Rok", "Počet druhů"])
+
+fig_yearly = px.bar(
+    yearly_counts,
+    x="Rok",
+    y="Počet druhů",
+    title="Celkový počet pozorovaných druhů podle roku",
+)
+
+fig_yearly.update_xaxes(type='category')
+
+# Podmínka pro zobrazení grafu pouze pokud je ve filtru vybráno "vyber"
+if show_bar_yearly and selected_species == "vyber":
     st.write("### Počet pozorovaných druhů v jednotlivých letech")
     st.plotly_chart(fig_yearly)
+
+# Výpočet procentuálního výskytu druhu a četnosti záznamů na jedno pozorování
+if selected_species != "vyber" and selected_species.strip():
+    total_observations = len(df)
+    species_observations = len(df[df[COL_SPECIES] == selected_species])
+    if total_observations > 0 and species_observations > 0:
+        species_percentage = (species_observations / total_observations) * 100
+        st.markdown(f"""
+        <div style='font-size: 25px; font-weight: bold;'>
+            Druh {selected_species} tvoří {species_percentage:.2f}% všech záznamů.
+        </div>
+        <div style='font-size: 25px; font-weight: bold;'>
+            Pozorování druhu {selected_species} je 1 z {total_observations // species_observations} pozorování.
+        </div>
+        """, unsafe_allow_html=True)
+
+
+
+
+
 
 # ========================
 # Graf: Počet pozorování vybraného druhu v jednotlivých letech
@@ -316,12 +369,48 @@ if selected_species not in ["Vyber", ""]:
         fig_species_yearly.update_xaxes(type='category')
 
         if show_bar_species_yearly:
-            st.write(f"### Počet pozorování druhu {selected_species} v jednotlivých letech")
+         #   st.write(f"### Počet pozorování druhu {selected_species} v jednotlivých letech")
             st.plotly_chart(fig_species_yearly)
+
+
+
 
 # ========================
 # Mapa s body pozorování (MarkerCluster)
 # ========================
+
+if show_map_markers:
+    if not filtered_data.empty and COL_LAT in filtered_data.columns and COL_LNG in filtered_data.columns:
+        # Střed mapy podle průměrné polohy
+        map_center = [
+            filtered_data[COL_LAT].mean(),
+            filtered_data[COL_LNG].mean()
+        ]
+    else:
+        # Fallback: střed ČR
+        map_center = [49.40099, 15.67521]
+
+    m = folium.Map(location=map_center, zoom_start=8.2)
+
+    if not filtered_data.empty:
+        from folium.plugins import MarkerCluster
+        marker_cluster = MarkerCluster().add_to(m)
+        for _, row in filtered_data.dropna(subset=[COL_LAT, COL_LNG]).iterrows():
+            # Popisek v bublině
+            popup_text = ""
+            if "Místo pozorování" in row and row["Místo pozorování"]:
+                popup_text += f"{row['Místo pozorování']}<br>"
+            if COL_COUNT in row and not pd.isna(row[COL_COUNT]):
+                popup_text += f"Počet: {row[COL_COUNT]}"
+            folium.Marker(
+                location=[row[COL_LAT], row[COL_LNG]],
+                popup=popup_text,
+            ).add_to(marker_cluster)
+
+        st.write("### Mapa pozorování (body)")
+        folium_static(m)
+    else:
+        st.info("Pro zobrazení nahoře vyberte druh.")
 
 # ========================
 # Heatmapa pozorování
@@ -360,59 +449,68 @@ if show_map_heat:
 # ========================
 # Grafy podle měsíců
 # ========================
-if not filtered_data.empty and COL_DATE in filtered_data.columns:
-    # Přidáme si textový název měsíce
-    filtered_data["Měsíc"] = filtered_data[COL_DATE].dt.month.map({
-        1: "Leden", 2: "Únor", 3: "Březen", 4: "Duben", 5: "Květen", 6: "Červen",
-        7: "Červenec", 8: "Srpen", 9: "Září", 10: "Říjen", 11: "Listopad", 12: "Prosinec"
-    })
+if not filtered_data.empty and COL_DATE in filtered_data.columns and COL_DATE2 in filtered_data.columns:
+    # Filtrovat pouze záznamy, kde COL_DATE a COL_DATE2 jsou ve stejném měsíci
+    filtered_data = filtered_data[
+        (filtered_data[COL_DATE].dt.month == filtered_data[COL_DATE2].dt.month) &
+        (filtered_data[COL_DATE].dt.year == filtered_data[COL_DATE2].dt.year)
+    ]
 
-    # Spočítáme počty pozorování a počty jedinců
-    # (pokud kolona "Počet" existuje)
-    group_dict = {"Datum": "count"}
-    if COL_COUNT in filtered_data.columns:
-        group_dict[COL_COUNT] = "sum"
+    if not filtered_data.empty:  # Zkontrolujeme, zda po filtraci nejsou data prázdná
+        # Přidáme textový název měsíce
+        filtered_data["Měsíc"] = filtered_data[COL_DATE].dt.month.map({
+            1: "Leden", 2: "Únor", 3: "Březen", 4: "Duben", 5: "Květen", 6: "Červen",
+            7: "Červenec", 8: "Srpen", 9: "Září", 10: "Říjen", 11: "Listopad", 12: "Prosinec"
+        })
 
-    monthly_counts = filtered_data.groupby("Měsíc").agg(group_dict).reset_index()
-    # Přejmenujeme
-    monthly_counts.rename(columns={
-        "Datum": "Počet pozorování",
-        COL_COUNT: "Počet jedinců" if COL_COUNT in filtered_data.columns else "Počet jedinců (není ve sloupci)"
-    }, inplace=True)
+        # Spočítáme počty pozorování a jedinců
+        group_dict = {COL_DATE: "count"}
+        if COL_COUNT in filtered_data.columns:
+            group_dict[COL_COUNT] = "sum"
 
-    # Vytvoříme rámec se všemi měsíci (pro správné seřazení a zobrazení i tam, kde jsou 0)
-    all_months_df = pd.DataFrame({
-        "Měsíc": [
-            "Leden","Únor","Březen","Duben","Květen","Červen",
-            "Červenec","Srpen","Září","Říjen","Listopad","Prosinec"
-        ]
-    })
+        monthly_counts = filtered_data.groupby("Měsíc").agg(group_dict).reset_index()
 
-    # Sloučíme a vyplníme nuly
-    monthly_counts = all_months_df.merge(monthly_counts, on="Měsíc", how="left").fillna(0)
-    monthly_counts["Počet pozorování"] = monthly_counts["Počet pozorování"].astype(int)
-    if "Počet jedinců" in monthly_counts.columns:
-        monthly_counts["Počet jedinců"] = monthly_counts["Počet jedinců"].astype(int)
+        # Přejmenujeme sloupce
+        monthly_counts.rename(columns={
+            COL_DATE: "Počet pozorování",
+            COL_COUNT: "Počet jedinců" if COL_COUNT in filtered_data.columns else "Počet jedinců (není ve sloupci)"
+        }, inplace=True)
 
-    # GRAF: Počet pozorování podle měsíců
-    if show_bar_monthly_obs:
-        fig_monthly_obs = px.bar(
-            monthly_counts,
-            x="Měsíc",
-            y="Počet pozorování",
-            title="Počet pozorování podle měsíců"
-        )
-        st.write("### Počet pozorování podle měsíců")
-        st.plotly_chart(fig_monthly_obs)
+        # Vytvoříme rámec se všemi měsíci (pro správné seřazení a zobrazení i tam, kde jsou 0)
+        all_months_df = pd.DataFrame({
+            "Měsíc": [
+                "Leden", "Únor", "Březen", "Duben", "Květen", "Červen",
+                "Červenec", "Srpen", "Září", "Říjen", "Listopad", "Prosinec"
+            ]
+        })
 
-    # (Případně druhý graf pro Počet jedinců, pokud chcete)
-    # fig_monthly_counts = px.bar(
-    #     monthly_counts,
-    #     x="Měsíc",
-    #     y="Počet jedinců",
-    #     title="Počet jedinců podle měsíců"
-    # )
-    # st.plotly_chart(fig_monthly_counts)
+        # Sloučíme a vyplníme nuly
+        monthly_counts = all_months_df.merge(monthly_counts, on="Měsíc", how="left").fillna(0)
+        monthly_counts["Počet pozorování"] = monthly_counts["Počet pozorování"].astype(int)
+        if "Počet jedinců" in monthly_counts.columns:
+            monthly_counts["Počet jedinců"] = monthly_counts["Počet jedinců"].astype(int)
+
+        # GRAF: Počet pozorování podle měsíců
+        if show_bar_monthly_obs:
+            fig_monthly_obs = px.bar(
+                monthly_counts,
+                x="Měsíc",
+                y="Počet pozorování",
+                title="Počet pozorování podle měsíců"
+            )
+            st.write("### Počet pozorování podle měsíců")
+            st.plotly_chart(fig_monthly_obs)
+
+        # (Případně druhý graf pro Počet jedinců)
+        # fig_monthly_counts = px.bar(
+        #     monthly_counts,
+        #     x="Měsíc",
+        #     y="Počet jedinců",
+        #     title="Počet jedinců podle měsíců"
+        # )
+        # st.plotly_chart(fig_monthly_counts)
+    else:
+        st.info("Žádná data po filtrování pro vykreslení grafu.")
 
 # ========================
 # Výpis tabulky s HTML odkazem + STRÁNKOVÁNÍ (100 záznamů na stránku)
@@ -440,7 +538,7 @@ if not filtered_data.empty:
     # Stránkování
     page_size = 300
     if "page_number" not in st.session_state:
-        st.session_state.page_number = 0
+        st.session_state.page_number = 1
 
     total_rows = len(filtered_data_display)
     n_pages = math.ceil(total_rows / page_size)
