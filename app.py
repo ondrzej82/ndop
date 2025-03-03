@@ -196,7 +196,7 @@ with c2:
 #    show_pie_top_species = st.checkbox("Koláč: Nejčastější druhy", value=True)
     show_bar_species_yearly = st.checkbox("Graf: Počet pozorování vybraného druhu", value=True)
 with c3:
-    show_map_markers = st.checkbox("Mapa s body pozorování", value=True)
+#    show_map_markers = st.checkbox("Mapa s body pozorování", value=True)
     show_map_heat = st.checkbox("Heatmapa pozorování", value=True)
 with c4:
     show_bar_monthly_obs = st.checkbox("Graf: Počty pozorování podle měsíců", value=True)
@@ -379,38 +379,38 @@ if selected_species not in ["Vyber", ""]:
 # Mapa s body pozorování (MarkerCluster)
 # ========================
 
-if show_map_markers:
-    if not filtered_data.empty and COL_LAT in filtered_data.columns and COL_LNG in filtered_data.columns:
-        # Střed mapy podle průměrné polohy
-        map_center = [
-            filtered_data[COL_LAT].mean(),
-            filtered_data[COL_LNG].mean()
-        ]
-    else:
-        # Fallback: střed ČR
-        map_center = [49.40099, 15.67521]
-
-    m = folium.Map(location=map_center, zoom_start=8.2)
-
-    if not filtered_data.empty:
-        from folium.plugins import MarkerCluster
-        marker_cluster = MarkerCluster().add_to(m)
-        for _, row in filtered_data.dropna(subset=[COL_LAT, COL_LNG]).iterrows():
-            # Popisek v bublině
-            popup_text = ""
-            if "Místo pozorování" in row and row["Místo pozorování"]:
-                popup_text += f"{row['Místo pozorování']}<br>"
-            if COL_COUNT in row and not pd.isna(row[COL_COUNT]):
-                popup_text += f"Počet: {row[COL_COUNT]}"
-            folium.Marker(
-                location=[row[COL_LAT], row[COL_LNG]],
-                popup=popup_text,
-            ).add_to(marker_cluster)
-
-        st.write("### Mapa pozorování (body)")
-        folium_static(m)
-    else:
-        st.info("Pro zobrazení nahoře vyberte druh.")
+#if show_map_markers:
+#    if not filtered_data.empty and COL_LAT in filtered_data.columns and COL_LNG in filtered_data.columns:
+#        # Střed mapy podle průměrné polohy
+#        map_center = [
+#            filtered_data[COL_LAT].mean(),
+#            filtered_data[COL_LNG].mean()
+#        ]
+#    else:
+#        # Fallback: střed ČR
+#        map_center = [49.40099, 15.67521]
+#
+#    m = folium.Map(location=map_center, zoom_start=8.2)
+#
+#    if not filtered_data.empty:
+#        from folium.plugins import MarkerCluster
+#        marker_cluster = MarkerCluster().add_to(m)
+#        for _, row in filtered_data.dropna(subset=[COL_LAT, COL_LNG]).iterrows():
+#            # Popisek v bublině
+#            popup_text = ""
+#            if "Místo pozorování" in row and row["Místo pozorování"]:
+#                popup_text += f"{row['Místo pozorování']}<br>"
+#            if COL_COUNT in row and not pd.isna(row[COL_COUNT]):
+#                popup_text += f"Počet: {row[COL_COUNT]}"
+#            folium.Marker(
+#                location=[row[COL_LAT], row[COL_LNG]],
+#                popup=popup_text,
+#            ).add_to(marker_cluster)
+#
+#        st.write("### Mapa pozorování (body)")
+#        folium_static(m)
+#    else:
+#        st.info("Pro zobrazení nahoře vyberte druh.")
 
 # ========================
 # Heatmapa pozorování
