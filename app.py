@@ -498,7 +498,7 @@ if not filtered_data.empty and COL_DATE in filtered_data.columns and COL_DATE2 i
                 y="Počet pozorování",
                 title="Počet pozorování podle měsíců"
             )
-            st.write("### Počet pozorování podle měsíců")
+#            st.write("### Počet pozorování podle měsíců")
             st.plotly_chart(fig_monthly_obs)
 
         # (Případně druhý graf pro Počet jedinců)
