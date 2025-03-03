@@ -515,7 +515,7 @@ if not filtered_data.empty and COL_DATE in filtered_data.columns and COL_DATE2 i
 # ========================
 # Výpis tabulky s HTML odkazem + STRÁNKOVÁNÍ (100 záznamů na stránku)
 # ========================
-st.write(f"### Výpis vyfiltrovaných pozorování")
+st.write(f"### Pozorování druhu: {selected_species}")
 
 if not filtered_data.empty:
     # Kopie jen pro úpravu zobrazení
