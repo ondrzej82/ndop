@@ -330,7 +330,7 @@ if selected_species != "vyber" and selected_species.strip():
             Druh {selected_species} tvoří {species_percentage:.2f}% všech záznamů.
         </div>
         <div style='font-size: 25px; font-weight: bold;'>
-            Pozorování druhu {selected_species} je 1 z {total_observations // species_observations} pozorování.
+            1 z {total_observations // species_observations} pozorování je {selected_species}.
         </div>
         """, unsafe_allow_html=True)
 
