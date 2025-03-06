@@ -426,8 +426,8 @@ if show_map_heat:
 
     heat_map = folium.Map(location=map_center, zoom_start=8)
     # Přidání vrstev
-    folium.TileLayer("Esri Satellite", name="Esri Satelitní").add_to(heat_map)
-    folium.TileLayer("CartoDB dark_matter", name="Dark Matter").add_to(heat_map)
+    folium.TileLayer("Esri Satellite", name="Esri Satelitní", attr="Esri").add_to(heat_map)
+    folium.TileLayer("CartoDB dark_matter", name="Dark Matter", attr="CartoDB").add_to(heat_map)
 
     # Přidání ovládání vrstev
     folium.LayerControl().add_to(heat_map)
