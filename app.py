@@ -425,11 +425,13 @@ if show_map_heat:
         map_center = [49.40099, 15.67521]
 
     heat_map = folium.Map(location=map_center, zoom_start=8)
+    # Přidání vrstev
+    folium.TileLayer("Esri Satellite", name="Esri Satelitní").add_to(heat_map)
+    folium.TileLayer("CartoDB dark_matter", name="Dark Matter").add_to(heat_map)
 
-    # 🔹 Přidání dalších volitelných vrstev (Esri, CartoDB)
-    folium.TileLayer("Stamen Terrain", name="Topografická mapa").add_to(m)
-    folium.TileLayer("CartoDB dark_matter", name="Tmavá mapa").add_to(m)
-    
+    # Přidání ovládání vrstev
+    folium.LayerControl().add_to(heat_map)
+ 
     if not filtered_data.empty:
         heat_df = filtered_data.dropna(subset=[COL_LAT, COL_LNG])
         # Pokud máme i počty, můžeme je sečíst
