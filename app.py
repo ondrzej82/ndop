@@ -190,17 +190,17 @@ df = load_data_from_drive()  # Pro data z Google Drive
 # ========================
 # Příprava checkboxů pro volitelné grafy / mapy
 # ========================
-#c1, c2, c3, c4 = st.columns(4)
-#with c1:
-#    show_bar_yearly = st.checkbox("Graf: Počet druhů v jednotlivých letech", value=True)
-#with c2:
+c1, c2, c3, c4 = st.columns(4)
+with c1:
+    show_bar_yearly = st.checkbox("Graf: Počet druhů v jednotlivých letech", value=True)
+with c2:
 #    show_pie_top_species = st.checkbox("Koláč: Nejčastější druhy", value=True)
-#    show_bar_species_yearly = st.checkbox("Graf: Počet pozorování vybraného druhu", value=True)
-#with c3:
+    show_bar_species_yearly = st.checkbox("Graf: Počet pozorování vybraného druhu", value=True)
+with c3:
 #    show_map_markers = st.checkbox("Mapa s body pozorování", value=True)
-#    show_map_heat = st.checkbox("Heatmapa pozorování", value=True)
-#with c4:
-#    show_bar_monthly_obs = st.checkbox("Graf: Počty pozorování podle měsíců", value=True)
+    show_map_heat = st.checkbox("Heatmapa pozorování", value=True)
+with c4:
+    show_bar_monthly_obs = st.checkbox("Graf: Počty pozorování podle měsíců", value=True)
 
 
 # ========================
