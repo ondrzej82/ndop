@@ -26,29 +26,29 @@ from pyproj import Transformer
 
 CONFIG = {
     # Sloupec s datem od (YYYYMMDD):
-    'col_date': 'DATUM_OD',
+    'col_date': 'CXAKCE_DATI_OD',
     # Sloupec s datem do (YYYYMMDD):
-    'col_date2': 'DATUM_DO',
+    'col_date2': 'CXAKCE_DATI_DO',
     # Sloupec s názvem druhu:
-    'col_species': 'CESKE_JMENO',
+    'col_species': 'CXTAXON_NAME_CZ',
     # Sloupec s pozorovateli:
-    'col_observer': 'AUTOR',
+    'col_observer': 'CXAKCE_AUTOR',
     # Sloupec s názvem města/obce:
-    'col_city': 'KATASTR',
+    'col_city': 'CXKATASTR_NAZEV',
     # Sloupec s názvem místa pozorování:
-    'col_location_name': 'NAZ_LOKAL',
+    'col_location_name': 'CXLOKAL_NAZEV',
     # Sloupec s minimálním počtem jedinců (pokud existuje):
     'col_count_min': 'POCET',
     # Sloupec s počtem (pokud existuje):
     'col_count': 'POCET',
     # Sloupec s odkazem (ID):
-    'col_link': 'ID_NALEZ',
+    'col_link': 'ID_ND_NALEZ',
     # Sloupec kvadrátem:
-    'col_kvadrat': 'SITMAP',
+    'col_kvadrat': 'CXLOKAL_KVADRAT_XY',
     # Sloupec se souřadnicí X (EPSG:5514):
-    'col_lng': 'X',
+    'col_lng': 'CXLOKAL_X',
     # Sloupec se souřadnicí Y (EPSG:5514):
-    'col_lat': 'Y',
+    'col_lat': 'CXLOKAL_Y',
     # Nepovinný sloupec s aktivitou (pokud CSV obsahuje):
     'col_activity': 'Activity',
 }
@@ -62,7 +62,7 @@ st.set_page_config(page_title="Statistika pozorování", layout="wide")
 FILE_PATH = "uploaded_file.csv"
 #https://drive.google.com/file/d/1aZF_k46UCLIXHj8HGrclXntiT3AsM2rO/view?usp=drive_link
 # ID souboru na Google Drive (pokud nechcete používat Google Drive, stačí vymazat)
-FILE_ID = "1aZF_k46UCLIXHj8HGrclXntiT3AsM2rO"
+FILE_ID = "1uIopJz3VCX8wpyqLVZKaGOwofR_G8YG-"
 FILE_URL = f"https://drive.google.com/uc?id={FILE_ID}"
 
 # ========================
@@ -78,6 +78,7 @@ def load_data(file_path: str) -> pd.DataFrame:
         df = pd.read_csv(
             file_path,
             delimiter=';',
+            decimal=',',  # <-- říká, že desetinný oddělovač je čárka
             encoding='utf-8-sig',  # ZMĚNA NA CP1250
             low_memory=False    # Zamezení DtypeWarning
         )
@@ -228,15 +229,15 @@ selected_species = st.selectbox("Vyberte druh:", species_list)
 if COL_DATE in df.columns and not df.empty:
     date_min = df[COL_DATE].min().date()
     date_max = df[COL_DATE].max().date()
-    years = sorted(df[COL_DATE].dropna().dt.year.unique())
+    years = sorted(df[COL_DATE].dropna().dt.year.unique(), reverse=True)
 else:
     date_min = datetime.today().date()
     date_max = datetime.today().date()
     years = []
 
-selected_year = st.selectbox("Vyberte rok:", ["Vlastní rozsah"] + [str(y) for y in years])
+selected_year = st.selectbox("Vyberte rok:", ["Všechny roky"] + [str(y) for y in years])
 
-if selected_year == "Vlastní rozsah":
+if selected_year == "Všechny roky":
     col_date_from, col_date_to = st.columns(2)
     with col_date_from:
         date_from = st.date_input("Datum od:", date_min, min_value=date_min, max_value=date_max)
@@ -291,6 +292,10 @@ fig_yearly = px.bar(
 
 fig_yearly.update_xaxes(type='category')
 
+# Nastavíme osu Y na celé hodnoty:
+fig_yearly.update_yaxes(dtick=max(1, yearly_counts["Počet druhů"].max() // 5))
+                       
+
 # Podmínka pro zobrazení grafu pouze pokud je ve filtru vybráno "vyber"
 if show_bar_yearly and selected_species == "Vyber":
  #   st.write("### Počet pozorovaných druhů v jednotlivých letech")
@@ -327,7 +332,7 @@ if selected_species != "vyber" and selected_species.strip():
         species_percentage = (species_observations / total_observations) * 100
         st.markdown(f"""
         <div style='font-size: 25px; font-weight: bold;'>
-            Druh {selected_species} tvoří {species_percentage:.2f}% všech záznamů.
+
         </div>
         <div style='font-size: 25px; font-weight: bold;'>
             1 z {total_observations // species_observations} pozorování je {selected_species}.
@@ -366,7 +371,7 @@ if selected_species not in ["Vyber", ""]:
             y="Počet pozorování",
             title=f"Počet pozorování druhu {selected_species} podle roku",
         )
-        fig_species_yearly.update_xaxes(type='category')
+        fig_species_yearly.update_yaxes(dtick=max(1, yearly_species_counts["Počet pozorování"].max() // 5))
 
         if show_bar_species_yearly:
          #   st.write(f"### Počet pozorování druhu {selected_species} v jednotlivých letech")
@@ -425,13 +430,7 @@ if show_map_heat:
         map_center = [49.40099, 15.67521]
 
     heat_map = folium.Map(location=map_center, zoom_start=8)
-    # Přidání vrstev
-#    folium.TileLayer("Esri Satellite", name="Esri Satelitní", attr="Esri").add_to(heat_map)
-#    folium.TileLayer("CartoDB dark_matter", name="Dark Matter", attr="CartoDB").add_to(heat_map)
 
-    # Přidání ovládání vrstev
-#    folium.LayerControl().add_to(heat_map)
- 
     if not filtered_data.empty:
         heat_df = filtered_data.dropna(subset=[COL_LAT, COL_LNG])
         # Pokud máme i počty, můžeme je sečíst
@@ -504,6 +503,9 @@ if not filtered_data.empty and COL_DATE in filtered_data.columns and COL_DATE2 i
                 y="Počet pozorování",
                 title="Počet pozorování podle měsíců"
             )
+
+            # Nastavení celočíselné hodnoty na ose Y:
+            fig_monthly_obs.update_yaxes(dtick=max(1, monthly_counts["Počet pozorování"].max() // 5))
 #            st.write("### Počet pozorování podle měsíců")
             st.plotly_chart(fig_monthly_obs)
 
@@ -521,13 +523,19 @@ if not filtered_data.empty and COL_DATE in filtered_data.columns and COL_DATE2 i
 # ========================
 # Výpis tabulky s HTML odkazem + STRÁNKOVÁNÍ (100 záznamů na stránku)
 # ========================
-st.write(f"### Pozorování druhu: {selected_species}")
+# Toto je verze, která NEpoužívá st.experimental_rerun.
+# Místo toho využívá on_click funkci, která ihned mění session_state a překreslí aplikaci.
+# Tlačítko "Načíst další" je umístěno dole pod tabulkou.
+# Pokud je záznamů méně nebo rovno 300, tlačítko se nezobrazí.
+
+if selected_species != "Vyber":
+    st.write(f"### Pozorování druhu: {selected_species}")
 
 if not filtered_data.empty:
     # Kopie jen pro úpravu zobrazení
     filtered_data_display = filtered_data.copy()
 
-    # Pokud sloupce existují, můžeme je zkracovat atd.
+    # Zkracování textu
     if "Místo pozorování" in filtered_data_display.columns:
         filtered_data_display["Místo pozorování"] = filtered_data_display["Místo pozorování"].apply(
             lambda x: (x[:50] + "...") if isinstance(x, str) and len(x) > 50 else x
@@ -541,64 +549,46 @@ if not filtered_data.empty:
             lambda x: x.strftime('%d. %m. %Y') if pd.notna(x) else ''
         )
 
-    # Stránkování
+    # Počet řádků na jednu dávku
     page_size = 300
-    if "page_number" not in st.session_state:
-        st.session_state.page_number = 1
+
+    # Pokud není v session_state rows_loaded, inicializujeme na 300
+    if "rows_loaded" not in st.session_state:
+        st.session_state.rows_loaded = page_size
 
     total_rows = len(filtered_data_display)
-    n_pages = math.ceil(total_rows / page_size)
 
-#Horní tlačítka
-    col_pag_left, col_pag_mid, col_pag_right = st.columns([1,2,1])
+    # Omezený dataframe
+    limited_data = filtered_data_display.iloc[:st.session_state.rows_loaded]
 
-    with col_pag_left:
-        if st.button("← Předchozí", key="prev_bottom"):
-            if st.session_state.page_number > 0:
-                st.session_state.page_number -= 1
-
-    with col_pag_mid:
-        st.write(f"Stránka {st.session_state.page_number + 1} / {n_pages}")
-
-    with col_pag_right:
-        if st.button("Další →", key="next_bottom"):
-            if st.session_state.page_number < n_pages - 1:
-                st.session_state.page_number += 1
-
-    start_idx = st.session_state.page_number * page_size
-    end_idx = start_idx + page_size
-
-    limited_data = filtered_data_display.iloc[start_idx:end_idx]
-
+    # Vybereme sloupce k zobrazení
     columns_to_show = []
-    for col in ["Datum", "Počet", "Místo pozorování", "Město", "Pozorovatel", "Odkaz"]:
+    for col in ["Datum", "Počet", "Místo pozorování", "Město", "Kvadrát", "Pozorovatel", "Odkaz"]:
         if col in limited_data.columns:
             columns_to_show.append(col)
 
+    # Vykreslíme tabulku
     st.write(
         limited_data[columns_to_show].to_html(index=False, escape=False),
         unsafe_allow_html=True
     )
 
-#Dolní tlačítka
+    # Funkce pro "načíst další"
+    def load_more():
+        st.session_state.rows_loaded += page_size
 
-
-    col_pag_left, col_pag_mid, col_pag_right = st.columns([1,2,1])
-
-    with col_pag_left:
-        if st.button("← Předchozí", key="prev_top"):
-            if st.session_state.page_number > 0:
-                st.session_state.page_number -= 1
-
-    with col_pag_mid:
-        st.write(f"Stránka {st.session_state.page_number + 1} / {n_pages}")
-
-    with col_pag_right:
-        if st.button("Další →", key="next_top"):
-            if st.session_state.page_number < n_pages - 1:
-                st.session_state.page_number += 1
-    start_idx = st.session_state.page_number * page_size
-    end_idx = start_idx + page_size
+    # Podle situace buď zobrazíme tlačítko, nebo info
+    if total_rows <= page_size:
+        # Pokud je celkový počet záznamů menší nebo roven 300, nic nenačítáme
+        st.info("Zobrazeny všechny záznamy.")
+    elif st.session_state.rows_loaded < total_rows:
+        # Pokud je co načíst
+        btn_col_left, btn_col_mid, btn_col_right = st.columns([2,1,2])
+        with btn_col_mid:
+            st.button("Načíst další záznamy", on_click=load_more)
+    else:
+        # Jinak zobrazíme info, že jsme vyčerpali všechny záznamy
+        st.info("Zobrazeny všechny záznamy.")
 
 else:
     st.info("Pro zobrazení nahoře vyberte druh.")
